@@ -1,3 +1,4 @@
+# Nightly EOD data refresh for the B3 options screener — see README_DEPLOY.md
 name: nightly-data-refresh
 
 on:
