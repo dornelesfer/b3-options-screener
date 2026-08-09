@@ -220,15 +220,15 @@ def build_chain_latest(chains, spots, r_curve, hist):
     chain = pd.DataFrame(rows)
 
     # smile residual: quadratic IV(k) fit per (underlying, expiry), >=5 pts
-    def smile_resid(g):
-        gg = g.dropna(subset=["iv"])
+    # (explicit loop, not groupby.apply — pandas 3 drops grouping columns there)
+    chain["smile_resid"] = np.nan
+    for _, idx in chain.groupby(["underlying", "expiry"]).groups.items():
+        gg = chain.loc[idx].dropna(subset=["iv"])
         if len(gg) < 5:
-            g["smile_resid"] = np.nan
-            return g
+            continue
         c = np.polyfit(gg["moneyness"], gg["iv"], 2)
-        g["smile_resid"] = g["iv"] - np.polyval(c, g["moneyness"])
-        return g
-    chain = chain.groupby(["underlying", "expiry"], group_keys=False).apply(smile_resid)
+        chain.loc[idx, "smile_resid"] = (chain.loc[idx, "iv"]
+                                         - np.polyval(c, chain.loc[idx, "moneyness"]))
 
     # same-strike call-put IV gap and parity residual
     piv = chain.pivot_table(index=["underlying", "expiry", "K"], columns="type",
