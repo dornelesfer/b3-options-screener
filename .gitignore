@@ -1,0 +1,19 @@
+# big local-only data — the deployed app only needs the compact caches below
+data/rb3_repository/
+data/raw/
+data/processed/
+models/
+*.log
+.DS_Store
+__pycache__/
+
+# results are 600MB of research artifacts; only the cVolGAN weights deploy
+results/*
+!results/volgan_cond_G_weights.npy
+!results/volgan_cond_norm.npy
+
+# KEEP tracked (deployment data path):
+#   data/ibov_options_all.parquet   data/equity_options.parquet
+#   data/equity_spot.parquet        data/rates_cdi.csv
+#   data/ibov_daily.csv             data/spot_yahoo_*.csv
+#   data/screener/*.parquet         results/volgan_cond_*.npy

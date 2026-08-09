@@ -1,0 +1,41 @@
+name: nightly-data-refresh
+
+on:
+  schedule:
+    # 01:30 UTC = 22:30 BRT — B3 publishes EOD COTAHIST in the evening BRT
+    - cron: "30 1 * * 2-6"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Ingest new B3 daily files
+        run: python update_daily_data.py
+
+      - name: Refresh CDI / IBOV series (BCB)
+        run: python download_bcb_series.py
+
+      - name: Rebuild screener metrics
+        run: python screener_metrics.py
+
+      - name: Commit refreshed data
+        run: |
+          git config user.name "nightly-bot"
+          git config user.email "actions@github.com"
+          git add data/*.parquet data/*.csv data/screener/
+          git diff --cached --quiet && echo "no changes" && exit 0
+          git commit -m "data: nightly refresh $(date -u +%F)"
+          git push
