@@ -102,9 +102,40 @@ Target: **GitHub repo + GitHub Actions nightly + Streamlit Community Cloud.**
 - Answer to "will deployed version be up to date": YES once the nightly job is
   live; data is EOD (B3 publishes after close), never intraday.
 
-## STATUS (updated 2026-08-08)
+## STATUS (updated 2026-09-01)
 
-DONE and verified:
+DEPLOYED (2026-08-09) and running:
+- Repo: github.com/dornelesfer/b3-options-screener (private, branch `master`).
+  The nightly Action has committed data every trading day since 2026-08-12;
+  one failure (08-11, BCB API 502 killed the job — now fail-soft, see below).
+- Streamlit Community Cloud connection is a browser/OAuth step only the user
+  can do (share.streamlit.io → New app → this repo → `app_options_screener.py`).
+  Whether it has been done is not visible from the repo.
+- Local dev stack is Python 3.9 / pandas 2 / Streamlit 1.32; CI and Cloud run
+  3.12 / pandas 3 / Streamlit 1.6x. Test on the modern stack before pushing:
+  `uv venv /tmp/b3venv --python 3.12 && uv pip install -r requirements.txt`.
+  (pandas 3 made `groupby.apply` drop grouping columns — fixed 08-09.)
+
+Added 2026-09-01 (uncommitted at time of writing — verify, commit, push):
+- Horizon-matched vol metrics (Burghardt & Lane cones): `rv_matched`,
+  `iv_minus_rv_h`, `cone_pct`, `cone_z` on chain_latest, plus `spread_h*` on
+  history_daily. `cone_z` is the default ranking metric. Read near the money.
+- App: `Max |log-moneyness|` filter (default 0.30) — deep-ITM prints carry IVs
+  of 100-250% on centavos of extrinsic value and their inflated IV drags delta
+  back toward 0.5, so delta cannot screen them; moneyness can. App tolerates a
+  parquet that predates new columns (code lands on Cloud before the nightly
+  rebuild). Streamlit width API shim for 1.32 vs 1.50+.
+- Pipeline hardening: `update_daily_data.py` stops (exit 0, `::warning::`) on
+  a non-404 B3 error instead of crashing, and never ingests a later day ahead
+  of a failed one (that hole would be permanent). `download_bcb_series.py` is
+  incremental (`--full` to rebuild), fail-soft, and append-only on the CSVs
+  (`float_precision="round_trip"` — otherwise every row re-serialises with a
+  different last digit). `screener_metrics.py` skips underlyings whose chain is
+  >30d stale (VALE5) and prints a `::warning::` if the newest chain is >3 bdays
+  old. Workflow: two cron slots (22:47 / 01:47 BRT), concurrency guard,
+  `git pull --rebase` before push, python 3.12, 30-min timeout.
+
+DONE and verified (2026-08-08):
 - `update_daily_data.py` WORKS — backfilled Apr→Aug (90 days) direct from B3,
   pure Python; all caches current through last close; dedupe verified.
 - `download_bcb_series.py` now also merges Yahoo ^BVSP into ibov_daily.csv
@@ -130,13 +161,20 @@ DONE and verified:
    retrain with WGAN-GP (gradient penalty, no clipping) or reduce N_CRIT;
    (c) alternatively rescale sampled ΔlogIV to match realized vol-of-vol as a
    stopgap. The app marks the metric EXPERIMENTAL with a warning until fixed.
-2. **User actions to deploy** (agent cannot do these): create GitHub repo, push,
-   connect Streamlit Community Cloud, enable the Action, run it once manually.
-   Exact commands in README_DEPLOY.md.
-3. Nice-to-have: more underlyings (add ISIN to update_daily_data.py — flows
+2. **Confirm Streamlit Community Cloud is connected** (user, browser only).
+   GitHub side is done: repo, Action, nightly commits all live.
+3. **Repo growth**: every nightly commit rewrites `equity_options.parquet`
+   (34MB, whole history since 2000) — ~2MB/day of pack growth (32→66MB in the
+   first 3 weeks). Fine for a year or two; when it hurts (Cloud clone time),
+   partition the raw caches by year so the nightly only rewrites the current
+   year's file. Loaders in screener_metrics/hedge_petr4/etc. would concat.
+4. Nice-to-have: more underlyings (add ISIN to update_daily_data.py — flows
    through automatically); BOVA11 spot already collected for future use;
    consider a small "strategy signal" tile showing the strangle entry rule
-   (spread pctile > 40 at ~30 DTE) from backtest_short_vol_v2.py.
+   (spread pctile > 40 at ~30 DTE) from backtest_short_vol_v2.py. Untracked
+   research scripts `election_risk_petr4.py`, `election_drawdown_detail.py`,
+   `hedge_petr4.py` (PETR4 election hedge, priced on closes) are worth adding
+   to the repo; their outputs go to results/ which is gitignored.
 
 ## Gotchas (learned the hard way)
 

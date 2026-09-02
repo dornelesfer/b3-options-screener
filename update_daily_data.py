@@ -21,12 +21,11 @@ Usage:
 
 import argparse
 import io
-import sys
+import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -77,6 +76,11 @@ def parse_cotahist_daily(raw: bytes) -> pd.DataFrame:
     return df.dropna(subset=["refdate"])
 
 
+class FetchError(Exception):
+    """Transient problem talking to B3 (5xx, timeout, truncated zip). Distinct
+    from a 404, which is the normal 'no trading day / not published yet'."""
+
+
 def fetch_day(day: pd.Timestamp):
     url = B3_URL.format(d=day.strftime("%d%m%Y"))
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -86,10 +90,17 @@ def fetch_day(day: pd.Timestamp):
     except urllib.error.HTTPError as e:
         if e.code == 404:
             return None                    # holiday / not published yet
-        raise
-    with zipfile.ZipFile(io.BytesIO(blob)) as z:
-        name = [n for n in z.namelist() if n.upper().endswith(".TXT")][0]
-        return parse_cotahist_daily(z.read(name))
+        raise FetchError(f"HTTP {e.code} from B3") from e
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        raise FetchError(f"network error talking to B3: {e}") from e
+    try:
+        with zipfile.ZipFile(io.BytesIO(blob)) as z:
+            txt = [n for n in z.namelist() if n.upper().endswith(".TXT")]
+            if not txt:
+                raise FetchError("zip has no .TXT member")
+            return parse_cotahist_daily(z.read(txt[0]))
+    except zipfile.BadZipFile as e:
+        raise FetchError(f"bad zip ({len(blob)} bytes)") from e
 
 
 def load_cache(path):
@@ -151,7 +162,15 @@ def main():
           f"{days[0].date()} → {days[-1].date()}")
     n_ok = 0
     for day in days:
-        df = fetch_day(day)
+        try:
+            df = fetch_day(day)
+        except FetchError as e:
+            # Stop here rather than skip: the next run resumes from the newest
+            # cached date, so ingesting a LATER day now would leave this one
+            # as a permanent hole. Exit 0 so the rest of the nightly pipeline
+            # still refreshes on the data we do have.
+            print(f"::warning::{day.date()}: {e} — stopping; will retry next run")
+            break
         if df is None:
             print(f"  {day.date()}: no file (holiday or not yet published)")
             continue

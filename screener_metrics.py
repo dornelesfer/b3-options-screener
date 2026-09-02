@@ -20,6 +20,54 @@ Outputs (data/screener/):
 Metrics lineage: iv_minus_rv is the VRP entry signal (backtest_short_vol*),
 cp_gap the covered-call flow gap (covered_call_flow.py), parity_resid /
 implied borrow from implied_carry.py, below_intrinsic from the BRAV3 work.
+
+HORIZON MATCHING (Burghardt & Lane 1990)
+----------------------------------------
+`iv_minus_rv` compares every option's implied vol to a fixed 21-day realised
+vol, whatever its time to expiry. On the current chain that means judging a
+725-day option against a 21-day window. Burghardt & Lane, "How to tell if
+options are cheap" (Journal of Portfolio Management 16(2):72-78, 1990), name
+this directly: an implied vol is a forecast over the option's REMAINING LIFE,
+so "the only option for which a thirty-trading-day historical volatility is an
+appropriate standard is an option with thirty trading days remaining to
+expiration."
+
+Their fix is the volatility cone -- the historical DISTRIBUTION of realised vol
+measured over the MATCHING horizon. Two facts make it matter:
+
+  * Cones narrow with horizon. Short-horizon realised vol is far more variable
+    than long-horizon (their Eurodollars: 1-month realised ranged 10-57%,
+    3-month 12-35%, 6-month narrower still). So a 5-point deviation is ordinary
+    at 21 days and extreme at 252, and a single fixed-window spread cannot
+    express that difference.
+  * A trailing window spikes at the START of a crisis, which makes options look
+    cheap exactly when they are dear. Their worked example: after October 1987,
+    30-day realised was enormous, so June-1988 Eurodollar options at 30% implied
+    looked cheap -- but 30% sat above the top of the nine-month cone, and
+    selling them was highly profitable.
+
+Corrected metrics, added alongside the originals rather than replacing them so
+existing consumers keep working:
+
+  rv_matched     realised vol over a window matching the option's own DTE
+  iv_minus_rv_h  implied minus rv_matched -- the horizon-matched spread
+  cone_pct       position of implied vol within the trailing cone at that
+                 horizon, in [0, 100]; 100 = above every realised outcome of
+                 that horizon in the lookback window
+  cone_z         same comparison in cone standard deviations. Use this to RANK:
+                 cone_pct saturates at 100 for 27% of the current chain (59% of
+                 the 70-150 day bucket), where cone_z keeps discriminating
+
+`iv_minus_rv` is retained and is correct only for options near 21 trading days
+(~30 calendar days) to expiry. Prefer `iv_minus_rv_h` / `cone_pct`.
+
+CAVEAT -- read the cone metrics near the money. All three compare an option's
+implied vol to the UNDERLYING's realised vol, which is an at-the-money concept.
+The smile inflates IV mechanically as you move out: on the current chain median
+`cone_z` runs 0.8 at |moneyness| < 0.05 and 5.2 beyond 0.35, so an unfiltered
+`cone_z` ranking returns deep wings rather than genuinely rich options. Filter
+to near-ATM, or read `cone_z` next to `smile_resid`, which is what strips the
+skew out.
 """
 
 import warnings
@@ -42,6 +90,15 @@ ANN = 252
 ATM_BAND = 0.05          # |K/F - 1| for ATM bucket
 ATM_DTE = (15, 60)
 HIST_YEARS = 3
+STALE_DAYS = 30          # drop an underlying from chain_latest if its newest
+                         # chain is this far behind the freshest one
+FRESH_BDAYS = 3          # warn if the newest chain is older than this many
+                         # business days (nightly job silently stopped ingesting)
+
+# volatility cones (Burghardt & Lane 1990)
+CONE_LOOKBACK = 504      # trailing window for the cone; the paper used ~2 years
+CONE_MIN_OBS = 60        # refuse to quote a percentile on less than this
+CONE_MAX_HORIZON = 252   # clamp: beyond a year the cone has too few draws here
 
 
 # ── Black-Scholes ────────────────────────────────────────────────────────────
@@ -69,6 +126,98 @@ def implied_vol(price, S, K, T, r, cp):
                       0.02, 3.0, xtol=1e-6)
     except ValueError:
         return np.nan
+
+
+# ── volatility cones ─────────────────────────────────────────────────────────
+def dte_to_trading_days(dte_calendar):
+    """Calendar days to expiry -> the trading-day horizon to measure RV over.
+
+    Option DTE is quoted in calendar days; realised vol is measured in trading
+    days. Converting keeps the two on the same clock.
+    """
+    h = int(round(float(dte_calendar) * ANN / 365.0))
+    return int(np.clip(h, 2, CONE_MAX_HORIZON))
+
+
+class ConeBook:
+    """Per-underlying volatility cones, cached by horizon.
+
+    A cone at horizon h is the distribution of annualised realised vol measured
+    over trailing h-trading-day windows. `position` returns where an implied vol
+    sits inside that distribution, using only windows that closed STRICTLY
+    BEFORE the quote date -- so the reading is causal and can be used as a
+    signal without lookahead.
+
+    Windows overlap (daily increments), which Burghardt & Lane note adds little
+    information over monthly steps. Treat the effective sample as roughly
+    lookback/horizon independent draws, not `lookback`.
+    """
+
+    def __init__(self, spots):
+        self._spots = spots
+        self._rv = {}
+        self._hist = {}
+
+    def rv_series(self, und, horizon):
+        """Annualised RV over trailing `horizon`-day windows, indexed by date."""
+        key = (und, horizon)
+        if key not in self._rv:
+            spot = self._spots.get(und)
+            if spot is None or len(spot) <= horizon:
+                self._rv[key] = pd.Series(dtype=float)
+            else:
+                lr = np.log(spot.astype(float)).diff()
+                self._rv[key] = lr.rolling(horizon).std() * np.sqrt(ANN)
+        return self._rv[key]
+
+    def matched_rv(self, und, day, horizon):
+        """RV over the `horizon`-day window ending on or before `day`."""
+        s = self.rv_series(und, horizon).dropna()
+        s = s[s.index <= day]
+        return float(s.iloc[-1]) if len(s) else np.nan
+
+    def cone(self, und, day, horizon, lookback=CONE_LOOKBACK):
+        """Trailing realised-vol draws for the cone at `horizon`, all from
+        windows that closed STRICTLY BEFORE `day` (no lookahead). None if too
+        few. Cached: every option on a chain at the same horizon shares one."""
+        key = (und, horizon, day, lookback)
+        if key not in self._hist:
+            s = self.rv_series(und, horizon).dropna()
+            s = s[s.index < day]
+            self._hist[key] = (s.iloc[-lookback:].to_numpy()
+                               if len(s) >= CONE_MIN_OBS else None)
+        return self._hist[key]
+
+    def position(self, und, day, iv, horizon, lookback=CONE_LOOKBACK):
+        """Percentile of `iv` within the trailing cone at `horizon`, in [0, 100].
+
+        `iv` and the cone are both in decimal units (0.30 = 30%).
+        """
+        if iv != iv:
+            return np.nan
+        hist = self.cone(und, day, horizon, lookback)
+        if hist is None:
+            return np.nan
+        return float((hist < iv).mean() * 100.0)
+
+    def zscore(self, und, day, iv, horizon, lookback=CONE_LOOKBACK):
+        """Distance from the cone's centre, in cone standard deviations.
+
+        `position` saturates: once implied sits above every realised outcome in
+        the lookback it reads 100 and stops ranking. On this chain that happens
+        for 27% of options overall and 59% of the 70-150 day bucket -- i.e.
+        exactly where the long-dated names live. This keeps discriminating above
+        the top of the cone, which is what the screener needs for ranking.
+        """
+        if iv != iv:
+            return np.nan
+        hist = self.cone(und, day, horizon, lookback)
+        if hist is None:
+            return np.nan
+        sd = hist.std()
+        if not sd:
+            return np.nan
+        return float((iv - hist.mean()) / sd)
 
 
 # ── loaders ──────────────────────────────────────────────────────────────────
@@ -131,7 +280,8 @@ def load_spots():
 
 
 # ── history: per-underlying ATM IV vs RV ─────────────────────────────────────
-def build_history(chains, spots, r_curve):
+def build_history(chains, spots, r_curve, cones=None):
+    cones = cones or ConeBook(spots)
     cutoff = chains["refdate"].max() - pd.DateOffset(years=HIST_YEARS)
     ch = chains[chains["refdate"] >= cutoff].copy()
     rows = []
@@ -159,26 +309,45 @@ def build_history(chains, spots, r_curve):
                 continue
             iv_atm = float(np.median(ivs))
             rv_t = float(rv.loc[day]) if day in rv.index and not np.isnan(rv.loc[day]) else np.nan
+
+            # horizon-matched: measure realised vol over the ATM bucket's own
+            # life, not a fixed 21 days (Burghardt & Lane 1990)
+            horizon = dte_to_trading_days(float(np.median(g["dte"])))
+            rv_h = cones.matched_rv(und, day, horizon)
+            cone_pct = cones.position(und, day, iv_atm, horizon)
+            cone_z = cones.zscore(und, day, iv_atm, horizon)
+
             rows.append({"underlying": und, "date": day, "spot": S,
                          "iv_atm": iv_atm * 100,
                          "rv21": rv_t * 100 if rv_t == rv_t else np.nan,
-                         "spread": (iv_atm - rv_t) * 100 if rv_t == rv_t else np.nan})
+                         "spread": (iv_atm - rv_t) * 100 if rv_t == rv_t else np.nan,
+                         "atm_horizon": horizon,
+                         "rv_matched": rv_h * 100 if rv_h == rv_h else np.nan,
+                         "spread_h": (iv_atm - rv_h) * 100 if rv_h == rv_h else np.nan,
+                         "cone_pct": cone_pct, "cone_z": cone_z})
     hist = pd.DataFrame(rows).sort_values(["underlying", "date"])
-    hist["spread_pctile"] = (hist.groupby("underlying")["spread"]
-                             .transform(lambda s: s.expanding(60)
-                                        .apply(lambda w: (w[:-1] < w[-1]).mean(),
-                                               raw=True) * 100))
+    for col, out in (("spread", "spread_pctile"), ("spread_h", "spread_h_pctile")):
+        hist[out] = (hist.groupby("underlying")[col]
+                     .transform(lambda s: s.expanding(60)
+                                .apply(lambda w: (w[:-1] < w[-1]).mean(),
+                                       raw=True) * 100))
     return hist
 
 
 # ── latest chain metrics ─────────────────────────────────────────────────────
-def build_chain_latest(chains, spots, r_curve, hist):
+def build_chain_latest(chains, spots, r_curve, hist, cones=None):
+    cones = cones or ConeBook(spots)
     rows = []
+    latest_any = chains["refdate"].max()
     for und, g_und in chains.groupby("underlying"):
         spot = spots.get(und)
         if spot is None:
             continue
         day = g_und["refdate"].max()
+        if day < latest_any - pd.Timedelta(days=STALE_DAYS):
+            # delisted or dead feed (VALE5 stopped in 2017): not a live chain
+            print(f"  {und}: last chain {day.date()}, skipping as stale")
+            continue
         if day not in spot.index:
             day2 = spot.index[spot.index <= day]
             if len(day2) == 0:
@@ -198,6 +367,10 @@ def build_chain_latest(chains, spots, r_curve, hist):
         ask = pd.to_numeric(g.get("best_ask"), errors="coerce")
         g["mid"] = np.where((bid > 0) & (ask >= bid), (bid + ask) / 2, g["close"])
 
+        # one matched-RV / cone reading per distinct horizon on this chain
+        horizons = {int(d): dte_to_trading_days(d) for d in g["dte"].unique()}
+        matched = {h: cones.matched_rv(und, day, h) for h in set(horizons.values())}
+
         for row in g.itertuples():
             T = row.dte / 365.0
             F = S * np.exp(r * T)
@@ -213,7 +386,18 @@ def build_chain_latest(chains, spots, r_curve, hist):
                 "iv": iv * 100 if iv == iv else np.nan,
                 "delta": bs_delta(S, row.strike_price, T, r, iv, row.type)
                          if iv == iv else np.nan,
+                # legacy fixed-21d spread: correct only near 21 trading days
                 "iv_minus_rv": (iv - rv) * 100 if (iv == iv and rv == rv) else np.nan,
+                # horizon-matched replacements
+                "rv_horizon": horizons[int(row.dte)],
+                "rv_matched": (matched[horizons[int(row.dte)]] * 100
+                               if matched[horizons[int(row.dte)]] ==
+                               matched[horizons[int(row.dte)]] else np.nan),
+                "iv_minus_rv_h": ((iv - matched[horizons[int(row.dte)]]) * 100
+                                  if (iv == iv and matched[horizons[int(row.dte)]] ==
+                                      matched[horizons[int(row.dte)]]) else np.nan),
+                "cone_pct": cones.position(und, day, iv, horizons[int(row.dte)]),
+                "cone_z": cones.zscore(und, day, iv, horizons[int(row.dte)]),
                 "below_intrinsic": bool(row.mid < intr - 0.01),
                 "intrinsic": intr,
             })
@@ -247,8 +431,12 @@ def build_chain_latest(chains, spots, r_curve, hist):
 
     # attach underlying-level context
     ctx = hist.sort_values("date").groupby("underlying").last().reset_index()
-    chain = chain.merge(ctx[["underlying", "iv_atm", "rv21", "spread",
-                             "spread_pctile"]], on="underlying", how="left",
+    ctx_cols = [c for c in ["underlying", "iv_atm", "rv21", "spread",
+                            "spread_pctile", "rv_matched", "spread_h",
+                            "spread_h_pctile", "cone_pct", "cone_z",
+                            "atm_horizon"]
+                if c in ctx.columns]
+    chain = chain.merge(ctx[ctx_cols], on="underlying", how="left",
                         suffixes=("", "_und"))
     return chain
 
@@ -314,18 +502,29 @@ def main():
     print(f"  chains: {len(chains):,} rows, underlyings "
           f"{sorted(chains['underlying'].unique())}")
 
-    hist = build_history(chains, spots, r_curve)
+    cones = ConeBook(spots)          # shared cache across both passes
+    hist = build_history(chains, spots, r_curve, cones)
     pq.write_table(pa.Table.from_pandas(hist, preserve_index=False),
                    str(OUT / "history_daily.parquet"))
     print(f"  history_daily: {len(hist):,} rows")
 
-    chain = build_chain_latest(chains, spots, r_curve, hist)
+    chain = build_chain_latest(chains, spots, r_curve, hist, cones)
     chain = attach_volgan_score(chain, chains, spots, r_curve)
     pq.write_table(pa.Table.from_pandas(chain, preserve_index=False),
                    str(OUT / "chain_latest.parquet"))
     for und, g in chain.groupby("underlying"):
         print(f"  {und}: {len(g)} options on {g['date'].max().date()}, "
-              f"{g['iv'].notna().sum()} with IV")
+              f"{g['iv'].notna().sum()} with IV, "
+              f"{g['cone_pct'].notna().sum()} with a cone reading")
+
+    # freshness guard: the nightly job exits 0 on "no new file" (holidays), so
+    # a feed that quietly stops would otherwise never surface. "::warning::" is
+    # picked up by GitHub Actions as an annotation on the run.
+    newest = chain["date"].max()
+    age = len(pd.bdate_range(newest, pd.Timestamp.today().normalize())) - 1
+    if age > FRESH_BDAYS:
+        print(f"::warning::screener data is {age} business days old "
+              f"(newest chain {newest.date()}) — check B3 ingest")
     print("Done.")
 
 

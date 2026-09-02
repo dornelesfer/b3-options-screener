@@ -8,7 +8,9 @@ caches, and Streamlit Cloud redeploys automatically on push.
 
 ## One-time setup (user actions)
 
-1. Create a **private** GitHub repo and push this folder:
+1. Create a **private** GitHub repo and push this folder — **DONE**:
+   `github.com/dornelesfer/b3-options-screener`, branch `master`, nightly
+   Action live since 2026-08-09. (For reference, the original command:)
 
 ```bash
 cd /Users/fd/volgan_b3_starter
