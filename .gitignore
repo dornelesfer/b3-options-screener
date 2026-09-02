@@ -6,6 +6,7 @@ models/
 *.log
 .DS_Store
 __pycache__/
+.venv/
 
 # results are 600MB of research artifacts; only the cVolGAN weights deploy
 results/*

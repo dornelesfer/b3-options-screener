@@ -42,8 +42,13 @@ Intraday data is NOT available on this stack — everything is end-of-day.
 
 ## Local run
 
+Use the same stack CI and Streamlit Cloud run (Python 3.12, current libraries),
+not the Mac's anaconda 3.9 — the two have already diverged once in production:
+
 ```bash
-python3 -m streamlit run app_options_screener.py --server.port 8601
+./dev_env.sh                                   # creates .venv via uv
+.venv/bin/python tests/smoke_test.py           # what CI runs on every push
+.venv/bin/python -m streamlit run app_options_screener.py --server.port 8601
 ```
 
 ## Adding an underlying

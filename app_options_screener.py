@@ -56,6 +56,8 @@ st.set_page_config(page_title="B3 Options Screener", layout="wide")
 # Streamlit 1.50+ replaced use_container_width=True with width="stretch" and
 # scheduled the old name for removal; Cloud installs the latest release while
 # the dev Mac runs 1.32. Pick the spelling this runtime understands.
+VRP_RANK_MIN = 0.40      # backtest_short_vol_v2 "vega+sig": skip below this rank
+
 _ST_VER = tuple(int(x) for x in st.__version__.split(".")[:2])
 STRETCH = {"width": "stretch"} if _ST_VER >= (1, 50) else {"use_container_width": True}
 
@@ -155,8 +157,26 @@ for c, und in zip(cols, sel_und):
                 if pd.notna(pct):
                     txt += f" (pctile {pct:.0f})"
             st.caption(txt)
+            # strategy tile: entry rule of backtest_short_vol_v2 (vega+sig
+            # sizing) read off the legacy spread percentile it was defined on
+            rank = r0.get("spread_pctile")
+            if pd.notna(rank):
+                rank = rank / 100.0
+                if rank >= VRP_RANK_MIN:
+                    size = 2 * (rank - VRP_RANK_MIN) / (1 - VRP_RANK_MIN)
+                    st.caption(f"VRP entry rule: **ON** · size **{size:.1f}x**"
+                               + ("" if und == "IBOV" else " · (rule backtested on IBOV)"))
+                else:
+                    st.caption(f"VRP entry rule: off (rank {rank:.2f} < {VRP_RANK_MIN})")
         else:
             st.caption("insufficient ATM/RV history")
+
+st.caption("VRP entry rule (backtest_short_vol_v2, Sharpe ~0.85 on IBOV): at the "
+           "monthly cycle, sell the ~30-DTE 25Δ strangle when the expanding "
+           "percentile rank of ATM IV − RV21 is ≥ 0.40; units = 2×(rank−0.40)/0.60, "
+           "so 0 at the threshold and 2× at the strongest signal seen. Delta-hedge "
+           "daily, hold to expiry. Shown for the equities as a reading, not a "
+           "backtested rule.")
 
 tab_rank, tab_smile, tab_hist, tab_flags = st.tabs(
     ["Rankings", "Smile", "IV vs RV history", "Anomalies"])

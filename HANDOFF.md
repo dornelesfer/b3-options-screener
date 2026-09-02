@@ -177,9 +177,11 @@ DONE and verified (2026-08-08):
    griddata as duplicates and the score depended on row order (diffs up to
    56 percentile points). Still EXPERIMENTAL for the dispersion reason above.
 4. Nice-to-have: more underlyings (add ISIN to update_daily_data.py — flows
-   through automatically); BOVA11 spot already collected for future use;
-   consider a small "strategy signal" tile showing the strangle entry rule
-   (spread pctile > 40 at ~30 DTE) from backtest_short_vol_v2.py. Untracked
+   through automatically); BOVA11 spot already collected for future use.
+   ~~Strategy tile~~ DONE 2026-09-01: KPI row shows the v2 "vega+sig" entry
+   rule (rank of IV−RV21 ≥ 0.40 → ON, size 2×(rank−0.40)/0.60) per underlying,
+   flagged as IBOV-only where backtested. `./dev_env.sh` builds a py3.12 venv
+   matching CI/Cloud. Untracked
    research scripts `election_risk_petr4.py`, `election_drawdown_detail.py`,
    `hedge_petr4.py` (PETR4 election hedge, priced on closes) are worth adding
    to the repo; their outputs go to results/ which is gitignored.
