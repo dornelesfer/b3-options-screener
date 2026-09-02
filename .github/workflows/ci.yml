@@ -1,0 +1,29 @@
+# Code-push smoke test: build the metrics from the committed caches and render
+# the app with Streamlit's AppTest on a fresh install — the same stack
+# Streamlit Cloud deploys onto. Catches library breaks before the deployed URL
+# does. Skips the nightly bot's data-only commits via the paths filter.
+name: ci
+
+on:
+  push:
+    branches: [master]
+    paths: ["**.py", "requirements.txt", ".github/workflows/**"]
+  pull_request:
+    paths: ["**.py", "requirements.txt", ".github/workflows/**"]
+  workflow_dispatch: {}
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt pyflakes
+      - name: Lint deployed modules
+        run: pyflakes app_options_screener.py screener_metrics.py update_daily_data.py download_bcb_series.py data_cache.py volgan_score.py
+      - name: Smoke test (metrics build + app render)
+        run: python tests/smoke_test.py

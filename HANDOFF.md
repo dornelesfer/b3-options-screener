@@ -168,7 +168,11 @@ DONE and verified (2026-08-08):
    (3.6MB / 0.5MB) is all the nightly rewrites now — was 34MB + 3.4MB per
    night. All readers go through `load_options(name)`. After an rb3 rebuild
    with `extract_equity_options.py`, run `python data_cache.py` to re-split.
-   Same commit: `volgan_score.surface_from_chain` now averages IV over
+   CI: `.github/workflows/ci.yml` runs `tests/smoke_test.py` on every code
+   push (metrics build from committed caches + AppTest render of the app on a
+   fresh py3.12 install) — the app is now tested before Cloud deploys it.
+   Run it locally with the modern venv before pushing app changes.
+   Same commit as the split: `volgan_score.surface_from_chain` now averages IV over
    duplicate (k,T) points — call and put at the same strike were fed to
    griddata as duplicates and the score depended on row order (diffs up to
    56 percentile points). Still EXPERIMENTAL for the dispersion reason above.
