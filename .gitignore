@@ -13,7 +13,8 @@ results/*
 !results/volgan_cond_norm.npy
 
 # KEEP tracked (deployment data path):
-#   data/ibov_options_all.parquet   data/equity_options.parquet
+#   data/ibov_options_all[_YYYY].parquet   data/equity_options[_YYYY].parquet
+#   (history file frozen before 2026 + one file per year; see data_cache.py)
 #   data/equity_spot.parquet        data/rates_cdi.csv
 #   data/ibov_daily.csv             data/spot_yahoo_*.csv
 #   data/screener/*.parquet         results/volgan_cond_*.npy

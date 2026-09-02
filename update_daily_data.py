@@ -10,7 +10,9 @@ For every missing business day between the newest cached date and today:
        - IBOV index options  (bdi 74/75, spec startswith "IBO")
        - equity options for tracked underlying ISINs (bdi 78/82)
        - spot rows for tracked symbols (bdi 02)
-  4. append to the parquet caches, deduped on (refdate, symbol)
+  4. append to the parquet caches, deduped on (refdate, symbol). Option caches
+     are partitioned by year (data_cache.py) so only the current year's file
+     is rewritten; equity_spot.parquet is small and stays a single file.
 
 Then run screener_metrics.py to refresh the app tables.
 
@@ -29,6 +31,8 @@ from pathlib import Path
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
+
+from data_cache import append_options, load_options
 
 BASE = Path(__file__).parent
 DATA = BASE / "data"
@@ -139,18 +143,19 @@ def main():
                     help="only look back N calendar days (default: since cache)")
     args = ap.parse_args()
 
-    ibo_p = DATA / "ibov_options_all.parquet"
-    eq_p = DATA / "equity_options.parquet"
     spot_p = DATA / "equity_spot.parquet"
 
-    ibo = load_cache(ibo_p)
-    eq = load_cache(eq_p)
+    # options caches are partitioned (data_cache.py): read through the helper,
+    # append only to the current year's file
+    ibo = load_options("ibov_options_all")
+    eq = load_options("equity_options")
     spot = load_cache(spot_p)
     isin_map = discover_isins(eq)
 
     last_cached = max(
         (c["refdate"].max() for c in (ibo, eq) if c is not None and len(c)),
         default=pd.Timestamp("2026-01-01"))
+    del ibo, eq                              # only needed for the two lines above
     start = (pd.Timestamp.today().normalize() - pd.Timedelta(days=args.days)
              if args.days else last_cached + pd.Timedelta(days=1))
     days = pd.bdate_range(start, pd.Timestamp.today().normalize())
@@ -195,8 +200,8 @@ def main():
                       & df["symbol"].isin(SPOT_SYMBOLS)].copy()
 
         drop = ["tpmerc"]
-        ibo = append_dedupe(ibo, new_ibo.drop(columns=drop), ibo_p)
-        eq = append_dedupe(eq, new_eq.drop(columns=drop), eq_p)
+        append_options("ibov_options_all", new_ibo.drop(columns=drop))
+        append_options("equity_options", new_eq.drop(columns=drop))
         new_spot = new_spot[["refdate", "symbol", "close", "volume"]]
         spot = append_dedupe(spot, new_spot, spot_p)
 

@@ -4,9 +4,10 @@ screener_metrics.py
 Builds the metrics tables behind the options screener app.
 
 Sources (all local caches):
-  IBOV  : data/ibov_options_all.parquet   (bdi 74/75)  spot data/ibov_daily.csv
-  PETR4 / VALE3 / VALE5 : data/equity_options.parquet  (bdi 78/82)
+  IBOV  : data/ibov_options_all[_YYYY].parquet (bdi 74/75) spot data/ibov_daily.csv
+  PETR4 / VALE3 / VALE5 : data/equity_options[_YYYY].parquet (bdi 78/82)
                           spot data/equity_spot.parquet
+  (option caches are partitioned by year — read via data_cache.load_options)
   BRAV3 : data/brav3_options_recent.csv               spot data/brav3_equity_recent.csv
   Rates : data/rates_cdi.csv (daily CDI, r_cc)
 
@@ -79,6 +80,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from scipy.stats import norm
 from scipy.optimize import brentq
+
+from data_cache import load_options
 
 warnings.filterwarnings("ignore")
 
@@ -230,12 +233,12 @@ def load_rates():
 def load_chains():
     frames = []
 
-    ibo = pq.read_table(str(BASE / "data" / "ibov_options_all.parquet")).to_pandas()
+    ibo = load_options("ibov_options_all")
     ibo["type"] = np.where(ibo["bdi_code"] == 74, "C", "P")
     ibo["underlying"] = "IBOV"
     frames.append(ibo)
 
-    eq = pq.read_table(str(BASE / "data" / "equity_options.parquet")).to_pandas()
+    eq = load_options("equity_options")
     eq["type"] = np.where(eq["bdi_code"] == 78, "C", "P")
     frames.append(eq)
 

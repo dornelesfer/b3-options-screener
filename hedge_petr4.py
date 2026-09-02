@@ -26,6 +26,7 @@ import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 
+from data_cache import load_options
 from screener_metrics import implied_vol, bs_delta
 
 warnings.filterwarnings("ignore")
@@ -61,7 +62,7 @@ def load():
     r = r.dropna(subset=["r_cc"]).set_index("date")["r_cc"]
     r = float(r.reindex([day], method="ffill").iloc[0])
 
-    o = pq.read_table(str(BASE / "data" / "equity_options.parquet")).to_pandas()
+    o = load_options("equity_options")
     o["refdate"] = pd.to_datetime(o["refdate"])
     o["maturity_date"] = pd.to_datetime(o["maturity_date"])
     ch = o[(o.underlying == "PETR4") & (o.refdate == day) & (o.close > 0)].copy()

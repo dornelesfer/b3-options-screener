@@ -72,6 +72,10 @@ def surface_from_chain(chain_day):
         return None
     d = chain_day.dropna(subset=["iv"])
     d = d[(d["dte"] >= 7) & (d["dte"] <= 150)]
+    # a call and a put at the same strike/expiry are duplicate (k, T) points
+    # with different IVs; griddata silently keeps whichever comes first, which
+    # made the score depend on row order. Average them.
+    d = d.groupby(["moneyness", "dte"], as_index=False)["iv"].mean()
     if len(d) < 12:
         return None
     pts = d[["moneyness", "dte"]].values.astype(float)

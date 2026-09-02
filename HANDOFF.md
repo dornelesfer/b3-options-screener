@@ -163,11 +163,15 @@ DONE and verified (2026-08-08):
    stopgap. The app marks the metric EXPERIMENTAL with a warning until fixed.
 2. **Confirm Streamlit Community Cloud is connected** (user, browser only).
    GitHub side is done: repo, Action, nightly commits all live.
-3. **Repo growth**: every nightly commit rewrites `equity_options.parquet`
-   (34MB, whole history since 2000) — ~2MB/day of pack growth (32→66MB in the
-   first 3 weeks). Fine for a year or two; when it hurts (Cloud clone time),
-   partition the raw caches by year so the nightly only rewrites the current
-   year's file. Loaders in screener_metrics/hedge_petr4/etc. would concat.
+3. ~~Repo growth~~ DONE 2026-09-01: option caches partitioned by year
+   (`data_cache.py`): `<name>.parquet` frozen through 2025, `<name>_2026.parquet`
+   (3.6MB / 0.5MB) is all the nightly rewrites now — was 34MB + 3.4MB per
+   night. All readers go through `load_options(name)`. After an rb3 rebuild
+   with `extract_equity_options.py`, run `python data_cache.py` to re-split.
+   Same commit: `volgan_score.surface_from_chain` now averages IV over
+   duplicate (k,T) points — call and put at the same strike were fed to
+   griddata as duplicates and the score depended on row order (diffs up to
+   56 percentile points). Still EXPERIMENTAL for the dispersion reason above.
 4. Nice-to-have: more underlyings (add ISIN to update_daily_data.py — flows
    through automatically); BOVA11 spot already collected for future use;
    consider a small "strategy signal" tile showing the strangle entry rule

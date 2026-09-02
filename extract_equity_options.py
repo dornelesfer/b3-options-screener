@@ -62,6 +62,9 @@ opts["maturity_date"] = pd.to_datetime(opts["maturity_date"])
 
 pq.write_table(pa.Table.from_pandas(spot, preserve_index=False),
                str(BASE / "data" / "equity_spot.parquet"))
+# NOTE: this writes the full history into the single history file. The caches
+# are partitioned by year (data_cache.py) — run `python data_cache.py` after a
+# rebuild to move the current years back out into their own files.
 pq.write_table(pa.Table.from_pandas(opts, preserve_index=False),
                str(BASE / "data" / "equity_options.parquet"))
 print(f"\nSaved: equity_spot.parquet ({len(spot):,}) | "

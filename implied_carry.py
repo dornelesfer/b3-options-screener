@@ -45,7 +45,8 @@ BLUE, RED, GOLD, GRAY = "#009c3b", "#e63946", "#c9a200", "#888888"
 
 
 def load():
-    opts = pq.read_table(str(BASE / "data" / "equity_options.parquet")).to_pandas()
+    from data_cache import load_options
+    opts = load_options("equity_options")
     opts = opts[(opts["close"] > 0) & (opts["traded_contracts"] > 0)]
 
     spot = pq.read_table(str(BASE / "data" / "equity_spot.parquet")).to_pandas()

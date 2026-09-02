@@ -95,8 +95,8 @@ def implied_vol(price, S, K, T, r, cp):
 
 # ── Data ──────────────────────────────────────────────────────────────────────
 def load_data():
-    import pyarrow.parquet as pq
-    opts = pq.read_table(str(BASE / "data" / "ibov_options_all.parquet")).to_pandas()
+    from data_cache import load_options
+    opts = load_options("ibov_options_all")
     opts = opts[(opts["close"] > 0)]
 
     ibov = pd.read_csv(BASE / "data" / "ibov_daily.csv", parse_dates=["date"])
