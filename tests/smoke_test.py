@@ -74,8 +74,8 @@ from streamlit.testing.v1 import AppTest
 at = AppTest.from_file(str(ROOT / "app_options_screener.py"), default_timeout=240).run()
 check(not at.exception, "no exception: " + "; ".join(str(e.value)[:200] for e in at.exception))
 check(not at.error, "no st.error")
-check([t.label for t in at.tabs] == ["Rankings", "Smile", "IV vs RV history", "Anomalies"],
-      "four tabs")
+check([t.label for t in at.tabs] == ["Rankings", "Smile", "IV vs RV history", "Anomalies", "Volatility cone"],
+      "five tabs")
 check(len(at.dataframe) >= 4, f"{len(at.dataframe)} tables rendered")
 check(len(at.get("plotly_chart")) >= 5, f"{len(at.get('plotly_chart'))} charts rendered")
 rich = at.dataframe[1].value

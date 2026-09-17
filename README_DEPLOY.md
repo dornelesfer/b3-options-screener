@@ -66,3 +66,22 @@ on COTAHIST option rows.
   prints per-underlying as-of dates.
 - Local pandas can't read/write parquet directly on the dev Mac (old pyarrow) —
   scripts already use `pyarrow.parquet` everywhere; keep doing that.
+
+## Volatility cone view
+
+The **Volatility cone** tab displays IBOV realized-volatility percentiles and
+near-ATM bid/ask IV intervals by expiry. It has independent date, reference
+window and call/put controls; the screener sidebar does not filter this tab.
+`volatility_cone.py` reads the committed IBOV option, price and CDI files, with
+cache invalidation keyed to all source file timestamps and sizes. No additional
+network service or dependency is required. The nightly job therefore updates
+this view along with the existing screener.
+
+IV is a cash-index European Black–Scholes indication using flat CDI carry,
+not a synchronized executable quote. No midpoint or last-price fallback is
+used. Missing dates remain missing, and wide spreads are displayed explicitly.
+Use **Latest quoted IV** to find the newest usable date for the selected type.
+The methodology expander describes filtering, horizons and model limitations.
+
+Run `python tests/test_volatility_cone.py` for historical causality, quote-side
+inversion and Streamlit control tests; these checks also run in CI.

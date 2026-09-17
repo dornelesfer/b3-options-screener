@@ -178,8 +178,8 @@ st.caption("VRP entry rule (backtest_short_vol_v2, Sharpe ~0.85 on IBOV): at the
            "daily, hold to expiry. Shown for the equities as a reading, not a "
            "backtested rule.")
 
-tab_rank, tab_smile, tab_hist, tab_flags = st.tabs(
-    ["Rankings", "Smile", "IV vs RV history", "Anomalies"])
+tab_rank, tab_smile, tab_hist, tab_flags, tab_cone = st.tabs(
+    ["Rankings", "Smile", "IV vs RV history", "Anomalies", "Volatility cone"])
 
 SHOW_COLS = ["underlying", "symbol", "type", "K", "expiry", "dte", "mid", "iv",
              "delta", "smile_resid", "rv_horizon", "rv_matched", "iv_minus_rv_h",
@@ -292,3 +292,8 @@ with tab_flags:
     st.caption("Reminder from the BRAV3 case: uniform one-sided residuals across "
                "strikes usually mean a tender offer, borrow squeeze, or pending "
                "corporate event — not free money.")
+
+
+with tab_cone:
+    from volatility_cone import render
+    render(BASE / "data")

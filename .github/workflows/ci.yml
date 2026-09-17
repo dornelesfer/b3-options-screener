@@ -24,6 +24,8 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt pyflakes
       - name: Lint deployed modules
-        run: pyflakes app_options_screener.py screener_metrics.py update_daily_data.py download_bcb_series.py data_cache.py volgan_score.py
+        run: pyflakes volatility_cone.py app_options_screener.py screener_metrics.py update_daily_data.py download_bcb_series.py data_cache.py volgan_score.py
       - name: Smoke test (metrics build + app render)
         run: python tests/smoke_test.py
+      - name: Cone causality and controls
+        run: python tests/test_volatility_cone.py
